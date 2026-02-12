@@ -32,9 +32,9 @@ jobs:
             # Git tag: <tag-name>-<commit-hash> (e.g. 26.02.01.01-749609e)
             echo "DOCKER_TAG=${{ github.ref_name }}-$SHORT_SHA" >> $GITHUB_ENV
           else
-            # Branch: <branch>-<YYMMDDHH>-<commit-hash>-<runid> (e.g. dev-26021214-749609e-123456789)
+            # Branch: <branch>-<YYMMDDHH>-<commit-hash>-<run_number> (e.g. dev-26021214-749609e-3)
             YYMMDDHH=$(date +%y%m%d%H)
-            echo "DOCKER_TAG=${{ github.ref_name }}-${YYMMDDHH}-${SHORT_SHA}-${{ github.run_id }}" >> $GITHUB_ENV
+            echo "DOCKER_TAG=${{ github.ref_name }}-${YYMMDDHH}-${SHORT_SHA}-${{ github.run_number }}" >> $GITHUB_ENV
           fi
 
       - name: Authenticate to Google Cloud
