@@ -24,18 +24,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set Docker tag (branch vs release)
+      - name: Set Docker tag (branch vs tag)
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          TIMESTAMP=$(date +%s)
           echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
-          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            # Git tag release: <tag-name>-<commit-hash> (e.g. 26.02.01.01-749609e)
+            # Git tag: <tag-name>-<commit-hash> (e.g. 26.02.01.01-749609e)
             echo "DOCKER_TAG=${{ github.ref_name }}-$SHORT_SHA" >> $GITHUB_ENV
           else
-            # Branch commit: <branch-name>-<timestamp>-<commit-hash> (e.g. dev-1770730330-749609e)
-            echo "DOCKER_TAG=${{ github.ref_name }}-$TIMESTAMP-$SHORT_SHA" >> $GITHUB_ENV
+            # Branch: <branch>-<YYMMDDHH>-<commit-hash>-<runid> (e.g. dev-26021214-749609e-123456789)
+            YYMMDDHH=$(date +%y%m%d%H)
+            echo "DOCKER_TAG=${{ github.ref_name }}-${YYMMDDHH}-${SHORT_SHA}-${{ github.run_id }}" >> $GITHUB_ENV
           fi
 
       - name: Authenticate to Google Cloud
