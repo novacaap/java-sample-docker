@@ -1,0 +1,9 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: java-sample-app:local
+    ports:
+      - "8080:8080"
+    container_name: java-sample-app

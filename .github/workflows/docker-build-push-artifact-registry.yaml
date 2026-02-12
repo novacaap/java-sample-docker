@@ -1,0 +1,77 @@
+name: Docker Build & Push to Artifact Registry
+on:
+  push:
+    branches: [dev, qa, prod]
+    tags: ['*']
+  workflow_dispatch:
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'usvisabox' }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
+  ARTIFACT_REGISTRY_REPO: ${{ vars.ARTIFACT_REGISTRY_REPO || 'uvb-apps' }}
+  IMAGE_NAME: java-sample-app
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate GCP config
+        run: |
+          if [ -z "${{ env.GCP_PROJECT_ID }}" ]; then echo "::error::Set GCP_PROJECT_ID in repo Variables"; exit 1; fi
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then echo "::error::Set GCP_SA_KEY in repo Secrets"; exit 1; fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Docker tag (branch vs release)
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%s)
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # Git tag release: <tag-name>-<commit-hash> (e.g. 26.02.01.01-749609e)
+            echo "DOCKER_TAG=${{ github.ref_name }}-$SHORT_SHA" >> $GITHUB_ENV
+          else
+            # Branch commit: <branch-name>-<timestamp>-<commit-hash> (e.g. dev-1770730330-749609e)
+            echo "DOCKER_TAG=${{ github.ref_name }}-$TIMESTAMP-$SHORT_SHA" >> $GITHUB_ENV
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Docker meta (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.DOCKER_TAG }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
