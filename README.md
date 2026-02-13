@@ -66,15 +66,13 @@ Then open http://localhost:8080 and http://localhost:8080/swagger-ui.html
 
 ## GitHub Actions: Variables and Secrets
 
-Configure these in the repo **Settings → Secrets and variables → Actions** for the Docker build-and-push workflow.
+Configure these in the repo **Settings → Secrets and variables → Actions** for the Docker build-and-push workflow. The workflow pushes images to **Docker Hub** only.
 
 ### Variables
 
 | Variable | Required | Sample / description |
 |----------|----------|----------------------|
-| `GCP_PROJECT_ID` | Yes | `my-gcp-project` |
-| `GCP_REGION` | No (default: asia-south1) | `asia-south1`, `us-central1` |
-| `ARTIFACT_REGISTRY_REPO` | No (default: uvb-apps) | `uvb-apps`, `docker-repo` |
+| `DOCKERHUB_USERNAME` | Yes | Docker Hub username, e.g. `myuser`. Image is pushed as `myuser/java-sample-app:<tag>`. |
 | `OCI_BUCKET_NAMESPACE` | When USE_OCI_M2=true | `axabcdefghij` (tenancy namespace) |
 | `OCI_BUCKET_NAME` | When USE_OCI_M2=true | `maven-m2-bucket` |
 | `OCI_M2_PREFIX` | No | `m2-repo/` or leave empty for bucket root |
@@ -84,7 +82,7 @@ Configure these in the repo **Settings → Secrets and variables → Actions** f
 
 | Secret | Required | Sample / description |
 |--------|----------|----------------------|
-| `GCP_SA_KEY` | Yes | JSON key of the GCP service account (full file content). Used to push images to Artifact Registry. |
+| `DOCKERHUB_TOKEN` | Yes | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). Used to push images to Docker Hub. |
 | `OCI_CLI_CONFIG` | When USE_OCI_M2=true | Full content of `~/.oci/config`. Example: |
 | `OCI_CLI_KEY` | When USE_OCI_M2=true | Private key PEM for the OCI user in config. Example: |
 
