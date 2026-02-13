@@ -83,26 +83,11 @@ Configure these in the repo **Settings → Secrets and variables → Actions** f
 | Secret              | Required             | Sample / description                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `DOCKERHUB_TOKEN`   | Yes                  | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). **Access permissions:** set to **Read, Write, Delete** (or at least **Read & Write**). If you see "access token has insufficient scopes" or 401 Unauthorized on push, create a new token with write/push permission. Email is not required for the workflow—username + PAT is enough. |
-| `TEAMS_WEBHOOK_URL` | No                   | Microsoft Teams incoming webhook URL. When set, the workflow sends a notification (success/failure) with status, ref, commit, image tag, and link to the run. Create in Teams: channel → Connectors → Incoming Webhook.                                                                                                                                                                                                                          |
-| `OCI_CLI_CONFIG`    | When USE_OCI_M2=true | Full content of `~/.oci/config`. Example:                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `OCI_CLI_KEY`       | When USE_OCI_M2=true | Private key PEM for the OCI user in config. Example:                                                                                                                                                                                                                                                                                                                                                                                             |
+| `TEAMS_WEBHOOK_URL`  | No                   | Microsoft Teams incoming webhook URL. When set, the workflow sends a notification (success/failure) with status, ref, commit, image tag, and link to the run. Create in Teams: channel → Connectors → Incoming Webhook.                                                                                                                                                                                                                          |
+| `OCI_CLI_USER`       | When USE_OCI_M2=true | User OCID from OCI config `[DEFAULT]` `user=`.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `OCI_CLI_TENANCY`    | When USE_OCI_M2=true | Tenancy OCID from config `tenancy=`.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `OCI_CLI_FINGERPRINT`| When USE_OCI_M2=true | API key fingerprint from config `fingerprint=`.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `OCI_CLI_KEY_CONTENT`| When USE_OCI_M2=true | Full private key PEM (entire key file content).                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `OCI_CLI_REGION`     | When USE_OCI_M2=true | Region identifier, e.g. `ap-mumbai-1`, from config `region=`.                                                                                                                                                                                                                                                                                                                                                                                    |
 
-**Example `OCI_CLI_CONFIG` (secret value):**
-
-```ini
-[DEFAULT]
-user=ocid1.user.oc1..aaaaaaaa...
-fingerprint=aa:bb:cc:dd:...
-tenancy=ocid1.tenancy.oc1..aaaaaaaa...
-region=ap-mumbai-1
-key_file=~/.oci/key.pem
-```
-
-**Example `OCI_CLI_KEY` (secret value):** Paste the entire PEM file, e.g.:
-
-```
------BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASC...
-...
------END PRIVATE KEY-----
-```
+**OCI secrets:** Values come from your `~/.oci/config` and the key PEM: copy `user`, `tenancy`, `fingerprint`, and `region` into the four named secrets, and paste the full PEM (including `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----`) into `OCI_CLI_KEY_CONTENT`.
