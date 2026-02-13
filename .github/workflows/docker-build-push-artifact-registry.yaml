@@ -71,15 +71,6 @@ jobs:
       - name: Prepare m2-repo
         run: mkdir -p m2-repo
 
-      - name: Restore OCI CLI cache
-        if: env.USE_OCI_M2 == 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/bin
-            ~/.local
-          key: oci-cli-${{ runner.os }}-1
-
       - name: Download M2 dependencies from OCI
         if: env.USE_OCI_M2 == 'true'
         env:
@@ -98,10 +89,8 @@ jobs:
           echo "$OCI_CLI_CONFIG" > ~/.oci/config
           echo "$OCI_CLI_KEY" > ~/.oci/key.pem
           chmod 600 ~/.oci/config ~/.oci/key.pem
+          bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
           export PATH="$HOME/bin:$PATH"
-          if ! command -v oci >/dev/null 2>&1; then
-            bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
-          fi
           oci os object list --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --limit 1
           PREFIX="${{ env.OCI_M2_PREFIX }}"
           if [ -n "$PREFIX" ]; then
@@ -109,15 +98,6 @@ jobs:
           else
             oci os object bulk-download --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --download-dir ./m2-repo
           fi
-
-      - name: Save OCI CLI cache
-        if: env.USE_OCI_M2 == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/bin
-            ~/.local
-          key: oci-cli-${{ runner.os }}-1
 
       - name: Set Docker tag (branch vs tag)
         id: set_tag
