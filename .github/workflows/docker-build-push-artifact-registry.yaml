@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 env:
   IMAGE_NAME: acute
-  # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_CONFIG, OCI_CLI_KEY. Set USE_OCI_M2=true to enable.
+  # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION. Set USE_OCI_M2=true to enable.
   OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
   OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
   OCI_M2_PREFIX: ${{ vars.OCI_M2_PREFIX || '' }}
@@ -38,6 +38,12 @@ jobs:
   build-and-push:
     needs: prevalidate
     runs-on: ubuntu-latest
+    env:
+      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
     outputs:
       docker_tag: ${{ steps.set_tag.outputs.tag }}
       commit_log: ${{ steps.commit_log.outputs.log }}
@@ -71,33 +77,42 @@ jobs:
       - name: Prepare m2-repo
         run: mkdir -p m2-repo
 
-      - name: Download M2 dependencies from OCI
+      - name: Validate OCI config
         if: env.USE_OCI_M2 == 'true'
         env:
-          OCI_CLI_CONFIG: ${{ secrets.OCI_CLI_CONFIG }}
-          OCI_CLI_KEY: ${{ secrets.OCI_CLI_KEY }}
+          OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
         run: |
-          if [ -z "$OCI_CLI_CONFIG" ] || [ -z "$OCI_CLI_KEY" ]; then
-            echo "::error::USE_OCI_M2 is true but OCI_CLI_CONFIG or OCI_CLI_KEY secret is missing"
+          if [ -z "$OCI_CLI_USER" ] || [ -z "$OCI_CLI_TENANCY" ] || [ -z "$OCI_CLI_FINGERPRINT" ] || [ -z "$OCI_CLI_KEY_CONTENT" ] || [ -z "$OCI_CLI_REGION" ]; then
+            echo "::error::USE_OCI_M2 is true but one or more OCI secrets are missing: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION"
             exit 1
           fi
           if [ -z "${{ env.OCI_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_BUCKET_NAME }}" ]; then
             echo "::error::Set OCI_BUCKET_NAMESPACE and OCI_BUCKET_NAME in repo Variables when USE_OCI_M2 is true"
             exit 1
           fi
-          mkdir -p ~/.oci
-          echo "$OCI_CLI_CONFIG" > ~/.oci/config
-          echo "$OCI_CLI_KEY" > ~/.oci/key.pem
-          chmod 600 ~/.oci/config ~/.oci/key.pem
-          bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
-          export PATH="$HOME/bin:$PATH"
-          oci os object list --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --limit 1
-          PREFIX="${{ env.OCI_M2_PREFIX }}"
-          if [ -n "$PREFIX" ]; then
-            oci os object bulk-download --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --prefix "$PREFIX" --download-dir ./m2-repo
-          else
-            oci os object bulk-download --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --download-dir ./m2-repo
-          fi
+          echo "OCI config validation passed"
+
+      - name: Verify OCI bucket access
+        if: env.USE_OCI_M2 == 'true'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object list --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --limit 1'
+
+      - name: Download M2 from OCI (with prefix)
+        if: env.USE_OCI_M2 == 'true' && env.OCI_M2_PREFIX != ''
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object bulk-download --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --prefix ${{ env.OCI_M2_PREFIX }} --download-dir ./m2-repo'
+
+      - name: Download M2 from OCI (no prefix)
+        if: env.USE_OCI_M2 == 'true' && env.OCI_M2_PREFIX == ''
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object bulk-download --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --download-dir ./m2-repo'
 
       - name: Set Docker tag (branch vs tag)
         id: set_tag
@@ -192,26 +207,34 @@ jobs:
           [ -z "$USE_TAG" ] && USE_TAG="(build did not complete)"
           IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${USE_TAG}"
           [ -z "$COMMIT_LOG" ] && COMMIT_LOG="(no list)"
-          COMMIT_LOG_NL=$(echo "$COMMIT_LOG" | sed 's/|/\\n/g')
-          BODY=$(cat <<EOF
-          {
-            "@type": "MessageCard",
-            "@context": "https://schema.org/extensions",
-            "themeColor": "${THEME}",
-            "summary": "Docker Build & Push - ${STATUS}",
-            "sections": [{
-              "activityTitle": "Docker Build & Push to Docker Hub",
-              "activitySubtitle": "${{ github.repository }}",
-              "facts": [
-                { "name": "Status", "value": "${STATUS}" },
-                { "name": "Ref", "value": "${{ github.ref_name }}" },
-                { "name": "Commit", "value": "${{ github.sha }}" },
-                { "name": "Image", "value": "${IMAGE_TAG}" },
-                { "name": "Commits", "value": "${COMMIT_LOG_NL}" },
-                { "name": "Run", "value": "[View workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" }
+          COMMIT_LOG_BR=$(echo "$COMMIT_LOG" | sed 's/|/<br>/g')
+          BODY=$(jq -n \
+            --arg theme "$THEME" \
+            --arg status "$STATUS" \
+            --arg repo "${{ github.repository }}" \
+            --arg ref "${{ github.ref_name }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg image "$IMAGE_TAG" \
+            --arg commits "$COMMIT_LOG_BR" \
+            --arg runUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              "@type": "MessageCard",
+              "@context": "https://schema.org/extensions",
+              "themeColor": $theme,
+              "summary": ("Docker Build & Push - " + $status),
+              "sections": [
+                {
+                  "activityTitle": "Docker Build & Push to Docker Hub",
+                  "activitySubtitle": $repo,
+                  "facts": [
+                    { "name": "Status", "value": $status },
+                    { "name": "Ref", "value": $ref },
+                    { "name": "Commit", "value": $sha },
+                    { "name": "Image", "value": $image },
+                    { "name": "Run", "value": ("[View workflow](" + $runUrl + ")") }
+                  ]
+                },
+                { "text": ("**Commits**<br>" + $commits) }
               ]
-            }]
-          }
-          EOF
-          )
+            }')
           curl -sS -X POST -H "Content-Type: application/json" -d "${BODY}" "$TEAMS_WEBHOOK_URL"
