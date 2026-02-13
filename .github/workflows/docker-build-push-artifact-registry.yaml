@@ -192,6 +192,7 @@ jobs:
           [ -z "$USE_TAG" ] && USE_TAG="(build did not complete)"
           IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${USE_TAG}"
           [ -z "$COMMIT_LOG" ] && COMMIT_LOG="(no list)"
+          COMMIT_LOG_NL=$(echo "$COMMIT_LOG" | sed 's/|/\\n/g')
           BODY=$(cat <<EOF
           {
             "@type": "MessageCard",
@@ -206,7 +207,7 @@ jobs:
                 { "name": "Ref", "value": "${{ github.ref_name }}" },
                 { "name": "Commit", "value": "${{ github.sha }}" },
                 { "name": "Image", "value": "${IMAGE_TAG}" },
-                { "name": "Commits", "value": "${COMMIT_LOG}" },
+                { "name": "Commits", "value": "${COMMIT_LOG_NL}" },
                 { "name": "Run", "value": "[View workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" }
               ]
             }]
