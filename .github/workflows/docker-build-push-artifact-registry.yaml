@@ -40,11 +40,33 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docker_tag: ${{ steps.set_tag.outputs.tag }}
+      commit_log: ${{ steps.commit_log.outputs.log }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Commit log
+        id: commit_log
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          if [ -n "$BEFORE" ] && [ -n "$AFTER" ] && [ "$BEFORE" != "$AFTER" ]; then
+            LOG=$(git log --oneline "$BEFORE".."$AFTER" 2>/dev/null || true)
+          else
+            LOG=$(git log -1 --oneline HEAD 2>/dev/null || true)
+          fi
+          [ -z "$LOG" ] && LOG="(no list)"
+          echo "## Commits in this push" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$LOG" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          LOG_ONELINE=$(echo "$LOG" | tr '\n' '|' | sed 's/|$//')
+          [ -z "$LOG_ONELINE" ] && LOG_ONELINE="(no list)"
+          echo "log<<EOF" >> $GITHUB_OUTPUT
+          echo "$LOG_ONELINE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Prepare m2-repo
         run: mkdir -p m2-repo
@@ -110,6 +132,14 @@ jobs:
           fi
           echo "tag=${{ env.DOCKER_TAG }}" >> $GITHUB_OUTPUT
 
+      - name: Docker image tag (Summary)
+        if: always()
+        run: |
+          echo "## Docker image tag" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${DOCKER_TAG:- (not set) }" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -145,13 +175,31 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout for fallback tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute fallback tag
+        id: fallback_tag
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          else
+            YYMMDDHH=$(date +%y%m%d%H)
+            echo "tag=${{ github.ref_name }}-${YYMMDDHH}-${SHORT_SHA}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Notify Microsoft Teams
         continue-on-error: true
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
           TAG: ${{ needs.build-and-push.outputs.docker_tag }}
+          FALLBACK_TAG: ${{ steps.fallback_tag.outputs.tag }}
           DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_USERNAME }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          COMMIT_LOG: ${{ needs.build-and-push.outputs.commit_log }}
         run: |
           if [ -z "$TEAMS_WEBHOOK_URL" ]; then
             echo "TEAMS_WEBHOOK_URL not set, skipping notification"
@@ -159,7 +207,11 @@ jobs:
           fi
           STATUS="${{ needs.build-and-push.result }}"
           [ "$STATUS" = "success" ] && THEME="0076D7" || THEME="D13438"
-          [ -z "$TAG" ] && IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:(build did not complete)" || IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${TAG}"
+          USE_TAG="${TAG}"
+          [ -z "$USE_TAG" ] && USE_TAG="${FALLBACK_TAG}"
+          [ -z "$USE_TAG" ] && USE_TAG="(build did not complete)"
+          IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${USE_TAG}"
+          [ -z "$COMMIT_LOG" ] && COMMIT_LOG="(no list)"
           BODY=$(cat <<EOF
           {
             "@type": "MessageCard",
@@ -174,6 +226,7 @@ jobs:
                 { "name": "Ref", "value": "${{ github.ref_name }}" },
                 { "name": "Commit", "value": "${{ github.sha }}" },
                 { "name": "Image", "value": "${IMAGE_TAG}" },
+                { "name": "Commits", "value": "${COMMIT_LOG}" },
                 { "name": "Run", "value": "[View workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" }
               ]
             }]
