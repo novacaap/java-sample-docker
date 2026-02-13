@@ -82,7 +82,8 @@ Configure these in the repo **Settings → Secrets and variables → Actions** f
 
 | Secret | Required | Sample / description |
 |--------|----------|----------------------|
-| `DOCKERHUB_TOKEN` | Yes | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). Used to push images to Docker Hub. |
+| `DOCKERHUB_TOKEN` | Yes | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). **Access permissions:** set to **Read, Write, Delete** (or at least **Read & Write**). If you see "access token has insufficient scopes" or 401 Unauthorized on push, create a new token with write/push permission. Email is not required for the workflow—username + PAT is enough. |
+| `TEAMS_WEBHOOK_URL` | No | Microsoft Teams incoming webhook URL. When set, the workflow sends a notification (success/failure) with status, ref, commit, image tag, and link to the run. Create in Teams: channel → Connectors → Incoming Webhook. |
 | `OCI_CLI_CONFIG` | When USE_OCI_M2=true | Full content of `~/.oci/config`. Example: |
 | `OCI_CLI_KEY` | When USE_OCI_M2=true | Private key PEM for the OCI user in config. Example: |
 
