@@ -207,7 +207,7 @@ jobs:
           [ -z "$USE_TAG" ] && USE_TAG="(build did not complete)"
           IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${USE_TAG}"
           [ -z "$COMMIT_LOG" ] && COMMIT_LOG="(no list)"
-          COMMIT_LOG_NL=$(echo "$COMMIT_LOG" | tr '|' '\n')
+          COMMIT_LOG_BR=$(echo "$COMMIT_LOG" | sed 's/|/<br>/g')
           BODY=$(jq -n \
             --arg theme "$THEME" \
             --arg status "$STATUS" \
@@ -215,7 +215,7 @@ jobs:
             --arg ref "${{ github.ref_name }}" \
             --arg sha "${{ github.sha }}" \
             --arg image "$IMAGE_TAG" \
-            --arg commits "$COMMIT_LOG_NL" \
+            --arg commits "$COMMIT_LOG_BR" \
             --arg runUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{
               "@type": "MessageCard",
@@ -234,7 +234,7 @@ jobs:
                     { "name": "Run", "value": ("[View workflow](" + $runUrl + ")") }
                   ]
                 },
-                { "text": ("**Commits**\n\n" + $commits) }
+                { "text": ("**Commits**<br><br>" + $commits) }
               ]
             }')
           curl -sS -X POST -H "Content-Type: application/json" -d "${BODY}" "$TEAMS_WEBHOOK_URL"
