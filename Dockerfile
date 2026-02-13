@@ -3,6 +3,8 @@ FROM maven:3.9.6-amazoncorretto-21-debian AS maven_build
 
 COPY pom.xml /tmp/
 COPY src /tmp/src/
+# OCI-downloaded or empty m2-repo (workflow ensures directory exists). Option B: copy always so local build with empty m2-repo works.
+COPY m2-repo/ /root/.m2/repository/
 
 WORKDIR /tmp/
 RUN mvn package -DskipTests

@@ -9,6 +9,11 @@ env:
   GCP_REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
   ARTIFACT_REGISTRY_REPO: ${{ vars.ARTIFACT_REGISTRY_REPO || 'uvb-apps' }}
   IMAGE_NAME: java-sample-app
+  # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_CONFIG, OCI_CLI_KEY. Set USE_OCI_M2=true to enable.
+  OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
+  OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
+  OCI_M2_PREFIX: ${{ vars.OCI_M2_PREFIX || '' }}
+  USE_OCI_M2: ${{ vars.USE_OCI_M2 || 'false' }}
 
 jobs:
   build-and-push:
@@ -23,6 +28,37 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Prepare m2-repo
+        run: mkdir -p m2-repo
+
+      - name: Download M2 dependencies from OCI
+        if: env.USE_OCI_M2 == 'true'
+        env:
+          OCI_CLI_CONFIG: ${{ secrets.OCI_CLI_CONFIG }}
+          OCI_CLI_KEY: ${{ secrets.OCI_CLI_KEY }}
+        run: |
+          if [ -z "$OCI_CLI_CONFIG" ] || [ -z "$OCI_CLI_KEY" ]; then
+            echo "::error::USE_OCI_M2 is true but OCI_CLI_CONFIG or OCI_CLI_KEY secret is missing"
+            exit 1
+          fi
+          if [ -z "${{ env.OCI_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_BUCKET_NAME }}" ]; then
+            echo "::error::Set OCI_BUCKET_NAMESPACE and OCI_BUCKET_NAME in repo Variables when USE_OCI_M2 is true"
+            exit 1
+          fi
+          mkdir -p ~/.oci
+          echo "$OCI_CLI_CONFIG" > ~/.oci/config
+          echo "$OCI_CLI_KEY" > ~/.oci/key.pem
+          chmod 600 ~/.oci/config ~/.oci/key.pem
+          bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
+          export PATH="$HOME/bin:$PATH"
+          oci os object list --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --limit 1
+          PREFIX="${{ env.OCI_M2_PREFIX }}"
+          if [ -n "$PREFIX" ]; then
+            oci os object bulk-download --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --prefix "$PREFIX" --download-dir ./m2-repo
+          else
+            oci os object bulk-download --namespace "${{ env.OCI_BUCKET_NAMESPACE }}" --bucket-name "${{ env.OCI_BUCKET_NAME }}" --download-dir ./m2-repo
+          fi
 
       - name: Set Docker tag (branch vs tag)
         run: |
