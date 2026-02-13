@@ -14,16 +14,33 @@ env:
   DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 
 jobs:
+  prevalidate:
+    name: Pre-validate config and Docker login
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required config
+        run: |
+          if [ -z "${{ env.DOCKERHUB_USERNAME }}" ]; then echo "::error::Set DOCKERHUB_USERNAME in repo Variables"; exit 1; fi
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then echo "::error::Set DOCKERHUB_TOKEN in repo Secrets"; exit 1; fi
+          echo "Config validation passed"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify Docker Hub access
+        run: |
+          docker info
+          echo "Docker Hub login verified"
+
   build-and-push:
+    needs: prevalidate
     runs-on: ubuntu-latest
     outputs:
       docker_tag: ${{ steps.set_tag.outputs.tag }}
     steps:
-      - name: Validate config
-        run: |
-          if [ -z "${{ env.DOCKERHUB_USERNAME }}" ]; then echo "::error::Set DOCKERHUB_USERNAME in repo Variables"; exit 1; fi
-          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then echo "::error::Set DOCKERHUB_TOKEN in repo Secrets"; exit 1; fi
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
