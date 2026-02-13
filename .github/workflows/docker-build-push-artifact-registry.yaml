@@ -234,7 +234,7 @@ jobs:
                     { "name": "Run", "value": ("[View workflow](" + $runUrl + ")") }
                   ]
                 },
-                { "text": ("**Commits**<br><br>" + $commits) }
+                { "text": ("**Commits**<br>" + $commits) }
               ]
             }')
           curl -sS -X POST -H "Content-Type: application/json" -d "${BODY}" "$TEAMS_WEBHOOK_URL"
