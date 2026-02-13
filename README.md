@@ -42,26 +42,6 @@ docker run -p 8080:8080 java-sample-app
 
 If you need dependencies from an OCI bucket, populate `m2-repo/` in Maven repository layout (e.g. `m2-repo/com/company/artifact/1.0/artifact-1.0.jar`) before building—for example by running the OCI CLI bulk-download step locally with your OCI config, or by using the same workflow (CI sets `USE_OCI_M2=true` and secrets).
 
-## Run with Docker Compose (local build and run)
-
-Ensure `m2-repo/` exists (e.g. `mkdir -p m2-repo`) so the build context is valid. Then build the image and start the app:
-
-```bash
-docker compose up --build
-```
-
-Run in the background:
-
-```bash
-docker compose up --build -d
-```
-
-Stop:
-
-```bash
-docker compose down
-```
-
 Then open http://localhost:8080 and http://localhost:8080/swagger-ui.html
 
 ## GitHub Actions: Workflow overview
@@ -83,25 +63,25 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 
 ### Variables
 
-| Variable               | Required             | Description |
-| ---------------------- | -------------------- | ----------- |
+| Variable               | Required             | Description                                                                                                                                              |
+| ---------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DOCKERHUB_USERNAME`   | Yes                  | Docker Hub username. The image is pushed as `DOCKERHUB_USERNAME/<IMAGE_NAME>:<tag>`. The default `IMAGE_NAME` is set in the workflow (`env.IMAGE_NAME`). |
-| `OCI_BUCKET_NAMESPACE` | When USE_OCI_M2=true | OCI Object Storage namespace (tenancy namespace). Find it in OCI Console under your tenancy or in `~/.oci/config` if you use the OCI CLI. |
-| `OCI_BUCKET_NAME`      | When USE_OCI_M2=true | Name of the bucket that holds your Maven M2 artifacts (e.g. JARs). |
-| `OCI_M2_PREFIX`        | No                   | Object prefix (folder) inside the bucket. Use e.g. `m2-repo/` to download only objects under that prefix, or leave empty to use the bucket root. |
-| `USE_OCI_M2`           | No (default: false)  | Set to `true` to enable downloading M2 dependencies from OCI before the Docker build. Requires the OCI variables and five OCI secrets below. |
+| `OCI_BUCKET_NAMESPACE` | When USE_OCI_M2=true | OCI Object Storage namespace (tenancy namespace). Find it in OCI Console under your tenancy or in `~/.oci/config` if you use the OCI CLI.                |
+| `OCI_BUCKET_NAME`      | When USE_OCI_M2=true | Name of the bucket that holds your Maven M2 artifacts (e.g. JARs).                                                                                       |
+| `OCI_M2_PREFIX`        | No                   | Object prefix (folder) inside the bucket. Use e.g. `m2-repo/` to download only objects under that prefix, or leave empty to use the bucket root.         |
+| `USE_OCI_M2`           | No (default: false)  | Set to `true` to enable downloading M2 dependencies from OCI before the Docker build. Requires the OCI variables and five OCI secrets below.             |
 
 ### Secrets
 
-| Secret               | Required             | Description |
-| -------------------- | -------------------- | ----------- |
-| `DOCKERHUB_TOKEN`    | Yes                  | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). Use **Read, Write, Delete** (or at least **Read & Write**). If you get "insufficient scopes" or 401 on push, create a new token with write permission. |
-| `TEAMS_WEBHOOK_URL`  | No                   | Microsoft Teams incoming webhook URL. When set, the workflow sends a notification (success or failure) with status, ref, commit SHA, image tag, commit list (each commit on its own line), and a link to the workflow run. Create in Teams: channel → Connectors → Incoming Webhook. |
-| `OCI_CLI_USER`       | When USE_OCI_M2=true | User OCID from your OCI config (`[DEFAULT]` → `user=`). |
-| `OCI_CLI_TENANCY`    | When USE_OCI_M2=true | Tenancy OCID from config (`tenancy=`). |
-| `OCI_CLI_FINGERPRINT`| When USE_OCI_M2=true | API key fingerprint from config (`fingerprint=`). |
-| `OCI_CLI_KEY_CONTENT`| When USE_OCI_M2=true | Full private key PEM: entire contents of the key file (including `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`). |
-| `OCI_CLI_REGION`     | When USE_OCI_M2=true | Region identifier from config (`region=`), e.g. `ap-mumbai-1`, `us-ashburn-1`. |
+| Secret                | Required             | Description                                                                                                                                                                                                                                                                                                       |
+| --------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOCKERHUB_TOKEN`     | Yes                  | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). Use **Read, Write, Delete** (or at least **Read & Write**). If you get "insufficient scopes" or 401 on push, create a new token with write permission. |
+| `TEAMS_WEBHOOK_URL`   | No                   | Microsoft Teams incoming webhook URL. When set, the workflow sends a notification (success or failure) with status, ref, commit SHA, image tag, commit list (each commit on its own line), and a link to the workflow run. Create in Teams: channel → Connectors → Incoming Webhook.                              |
+| `OCI_CLI_USER`        | When USE_OCI_M2=true | User OCID from your OCI config (`[DEFAULT]` → `user=`).                                                                                                                                                                                                                                                           |
+| `OCI_CLI_TENANCY`     | When USE_OCI_M2=true | Tenancy OCID from config (`tenancy=`).                                                                                                                                                                                                                                                                            |
+| `OCI_CLI_FINGERPRINT` | When USE_OCI_M2=true | API key fingerprint from config (`fingerprint=`).                                                                                                                                                                                                                                                                 |
+| `OCI_CLI_KEY_CONTENT` | When USE_OCI_M2=true | Full private key PEM: entire contents of the key file (including `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`).                                                                                                                                                                                  |
+| `OCI_CLI_REGION`      | When USE_OCI_M2=true | Region identifier from config (`region=`), e.g. `ap-mumbai-1`, `us-ashburn-1`.                                                                                                                                                                                                                                    |
 
 ### OCI setup (when using USE_OCI_M2)
 
