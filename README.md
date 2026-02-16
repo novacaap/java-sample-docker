@@ -82,6 +82,7 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 | `OCI_CLI_FINGERPRINT` | When USE_OCI_M2=true | API key fingerprint from config (`fingerprint=`).                                                                                                                                                                                                                                                                 |
 | `OCI_CLI_KEY_CONTENT` | When USE_OCI_M2=true | Full private key PEM: entire contents of the key file (including `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`).                                                                                                                                                                                  |
 | `OCI_CLI_REGION`      | When USE_OCI_M2=true | Region identifier from config (`region=`), e.g. `ap-mumbai-1`, `us-ashburn-1`.                                                                                                                                                                                                                                    |
+| `OCI_CLI_PASSPHRASE`  | No (when key encrypted) | Passphrase for the OCI API signing key. Set this secret only when your private key is encrypted (passphrase-protected). The workflow uses the `OCI_CLI_PASSPHRASE` environment variable expected by the OCI CLI. Leave unset if the key is not encrypted.                                                          |
 
 ### OCI setup (when using USE_OCI_M2)
 
@@ -91,7 +92,7 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
    - `tenancy` → secret **OCI_CLI_TENANCY**
    - `fingerprint` → secret **OCI_CLI_FINGERPRINT**
    - `region` → secret **OCI_CLI_REGION**
-3. Paste the full key file (the PEM referenced by `key_file` in config) into secret **OCI_CLI_KEY_CONTENT**.
+3. Paste the full key file (the PEM referenced by `key_file` in config) into secret **OCI_CLI_KEY_CONTENT**. If your key is encrypted (passphrase-protected), also set secret **OCI_CLI_PASSPHRASE** to the key’s passphrase.
 4. Set variables **OCI_BUCKET_NAMESPACE** and **OCI_BUCKET_NAME** to your bucket. Optionally set **OCI_M2_PREFIX** (e.g. `m2-repo/`) to limit the download to a prefix.
 5. Set variable **USE_OCI_M2** to `true`.
 

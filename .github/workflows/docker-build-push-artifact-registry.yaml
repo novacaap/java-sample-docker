@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 env:
   IMAGE_NAME: acute
-  # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION. Set USE_OCI_M2=true to enable.
+  # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION; optional OCI_CLI_PASSPHRASE when private key is encrypted. Set USE_OCI_M2=true to enable.
   OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
   OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
   OCI_M2_PREFIX: ${{ vars.OCI_M2_PREFIX || '' }}
@@ -113,6 +113,7 @@ jobs:
       OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
       OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
       OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+      OCI_CLI_PASSPHRASE: ${{ secrets.OCI_CLI_PASSPHRASE || '' }}
     outputs:
       docker_tag: ${{ steps.set_tag.outputs.tag }}
       commit_log: ${{ steps.commit_log.outputs.log }}
@@ -154,6 +155,7 @@ jobs:
           OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
           OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          OCI_CLI_PASSPHRASE: ${{ secrets.OCI_CLI_PASSPHRASE || '' }}
         run: |
           if [ -z "$OCI_CLI_USER" ] || [ -z "$OCI_CLI_TENANCY" ] || [ -z "$OCI_CLI_FINGERPRINT" ] || [ -z "$OCI_CLI_KEY_CONTENT" ] || [ -z "$OCI_CLI_REGION" ]; then
             echo "::error::USE_OCI_M2 is true but one or more OCI secrets are missing: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION"
