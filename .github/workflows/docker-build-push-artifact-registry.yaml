@@ -17,12 +17,81 @@ jobs:
   prevalidate:
     name: Pre-validate config and Docker login
     runs-on: ubuntu-latest
+    env:
+      USE_OCI_M2: ${{ vars.USE_OCI_M2 || 'false' }}
+      OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
+      OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
     steps:
-      - name: Validate required config
+      - name: Validate Variables and Secrets
         run: |
-          if [ -z "${{ env.DOCKERHUB_USERNAME }}" ]; then echo "::error::Set DOCKERHUB_USERNAME in repo Variables"; exit 1; fi
-          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then echo "::error::Set DOCKERHUB_TOKEN in repo Secrets"; exit 1; fi
-          echo "Config validation passed"
+          set -e
+          MISSING_VARS=""
+          MISSING_SECRETS=""
+
+          # Required Variables (GitHub repo Variables)
+          echo "Validating Variables..."
+          if [ -z "${{ vars.DOCKERHUB_USERNAME }}" ]; then
+            echo "::error::Variable DOCKERHUB_USERNAME is required. Set it in Settings → Secrets and variables → Actions → Variables."
+            MISSING_VARS="${MISSING_VARS}DOCKERHUB_USERNAME"$'\n'
+          fi
+
+          # Required Secrets (GitHub repo Secrets)
+          echo "Validating Secrets..."
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "::error::Secret DOCKERHUB_TOKEN is required. Set it in Settings → Secrets and variables → Actions → Secrets."
+            MISSING_SECRETS="${MISSING_SECRETS}DOCKERHUB_TOKEN"$'\n'
+          fi
+
+          # When USE_OCI_M2 is true: require OCI Variables and Secrets
+          if [ "${{ env.USE_OCI_M2 }}" = "true" ]; then
+            echo "Validating OCI Variables (USE_OCI_M2=true)..."
+            if [ -z "${{ vars.OCI_BUCKET_NAMESPACE }}" ]; then
+              echo "::error::Variable OCI_BUCKET_NAMESPACE is required when USE_OCI_M2=true."
+              MISSING_VARS="${MISSING_VARS}OCI_BUCKET_NAMESPACE"$'\n'
+            fi
+            if [ -z "${{ vars.OCI_BUCKET_NAME }}" ]; then
+              echo "::error::Variable OCI_BUCKET_NAME is required when USE_OCI_M2=true."
+              MISSING_VARS="${MISSING_VARS}OCI_BUCKET_NAME"$'\n'
+            fi
+            echo "Validating OCI Secrets..."
+            if [ -z "${{ secrets.OCI_CLI_USER }}" ]; then
+              echo "::error::Secret OCI_CLI_USER is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_USER"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_TENANCY }}" ]; then
+              echo "::error::Secret OCI_CLI_TENANCY is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_TENANCY"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_FINGERPRINT }}" ]; then
+              echo "::error::Secret OCI_CLI_FINGERPRINT is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_FINGERPRINT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_KEY_CONTENT }}" ]; then
+              echo "::error::Secret OCI_CLI_KEY_CONTENT is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_KEY_CONTENT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_REGION }}" ]; then
+              echo "::error::Secret OCI_CLI_REGION is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_REGION"$'\n'
+            fi
+          fi
+
+          if [ -n "$MISSING_VARS" ] || [ -n "$MISSING_SECRETS" ]; then
+            echo ""
+            echo "=== Not set (must be configured in Settings → Secrets and variables → Actions) ==="
+            if [ -n "$MISSING_VARS" ]; then
+              echo "Variables not set:"
+              echo "$MISSING_VARS" | sed '/^$/d' | sed 's/^/  - /'
+            fi
+            if [ -n "$MISSING_SECRETS" ]; then
+              echo "Secrets not set:"
+              echo "$MISSING_SECRETS" | sed '/^$/d' | sed 's/^/  - /'
+            fi
+            echo ""
+            echo "::error::Validation failed. Configure the items above in GitHub: Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Variables and Secrets validation passed."
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
