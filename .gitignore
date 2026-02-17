@@ -13,6 +13,9 @@ local.properties
 target/
 .loadpath
 
+# OCI-downloaded Maven repo (workflow creates this; do not commit)
+m2-repo/
+
 *.py
 
 .bash_profile

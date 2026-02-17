@@ -1,61 +1,311 @@
-name: Docker Build & Push to Artifact Registry
+name: Docker Build & Push to Docker Hub
 on:
   push:
     branches: [dev, qa, prod]
     tags: ['*']
   workflow_dispatch:
 env:
-  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'usvisabox' }}
-  GCP_REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
-  ARTIFACT_REGISTRY_REPO: ${{ vars.ARTIFACT_REGISTRY_REPO || 'uvb-apps' }}
-  IMAGE_NAME: java-sample-app
+  IMAGE_NAME: acute
+  # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION; optional OCI_CLI_PASSPHRASE when private key is encrypted. Set USE_OCI_M2=true to enable.
+  # OCI config bucket: separate bucket, one folder per repo (repo name). Set USE_OCI_CONFIG=true and OCI_CONFIG_BUCKET_NAMESPACE, OCI_CONFIG_BUCKET_NAME; optional OCI_CONFIG_PREFIX, OCI_CONFIG_PROFILE. Same OCI secrets as M2.
+  OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
+  OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
+  OCI_M2_PREFIX: ${{ vars.OCI_M2_PREFIX || '' }}
+  USE_OCI_M2: ${{ vars.USE_OCI_M2 || 'false' }}
+  USE_OCI_CONFIG: ${{ vars.USE_OCI_CONFIG || 'false' }}
+  OCI_CONFIG_BUCKET_NAMESPACE: ${{ vars.OCI_CONFIG_BUCKET_NAMESPACE || '' }}
+  OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
+  OCI_CONFIG_PREFIX: ${{ vars.OCI_CONFIG_PREFIX || '' }}
+  OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 
 jobs:
-  build-and-push:
+  prevalidate:
+    name: Pre-validate config and Docker login
     runs-on: ubuntu-latest
+    env:
+      USE_OCI_M2: ${{ vars.USE_OCI_M2 || 'false' }}
+      USE_OCI_CONFIG: ${{ vars.USE_OCI_CONFIG || 'false' }}
+      OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
+      OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
+      OCI_CONFIG_BUCKET_NAMESPACE: ${{ vars.OCI_CONFIG_BUCKET_NAMESPACE || '' }}
+      OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
+      OCI_CONFIG_PREFIX: ${{ vars.OCI_CONFIG_PREFIX || '' }}
+      OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
     steps:
-      - name: Validate GCP config
+      - name: Validate Variables and Secrets
         run: |
-          if [ -z "${{ env.GCP_PROJECT_ID }}" ]; then echo "::error::Set GCP_PROJECT_ID in repo Variables"; exit 1; fi
-          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then echo "::error::Set GCP_SA_KEY in repo Secrets"; exit 1; fi
+          set -e
+          MISSING_VARS=""
+          MISSING_SECRETS=""
 
+          # Required Variables (GitHub repo Variables)
+          echo "Validating Variables..."
+          if [ -z "${{ vars.DOCKERHUB_USERNAME }}" ]; then
+            echo "::error::Variable DOCKERHUB_USERNAME is required. Set it in Settings → Secrets and variables → Actions → Variables."
+            MISSING_VARS="${MISSING_VARS}DOCKERHUB_USERNAME"$'\n'
+          fi
+
+          # Required Secrets (GitHub repo Secrets)
+          echo "Validating Secrets..."
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "::error::Secret DOCKERHUB_TOKEN is required. Set it in Settings → Secrets and variables → Actions → Secrets."
+            MISSING_SECRETS="${MISSING_SECRETS}DOCKERHUB_TOKEN"$'\n'
+          fi
+
+          # When USE_OCI_M2 is true: require OCI Variables and Secrets
+          if [ "${{ env.USE_OCI_M2 }}" = "true" ]; then
+            echo "Validating OCI Variables (USE_OCI_M2=true)..."
+            if [ -z "${{ vars.OCI_BUCKET_NAMESPACE }}" ]; then
+              echo "::error::Variable OCI_BUCKET_NAMESPACE is required when USE_OCI_M2=true."
+              MISSING_VARS="${MISSING_VARS}OCI_BUCKET_NAMESPACE"$'\n'
+            fi
+            if [ -z "${{ vars.OCI_BUCKET_NAME }}" ]; then
+              echo "::error::Variable OCI_BUCKET_NAME is required when USE_OCI_M2=true."
+              MISSING_VARS="${MISSING_VARS}OCI_BUCKET_NAME"$'\n'
+            fi
+            echo "Validating OCI Secrets..."
+            if [ -z "${{ secrets.OCI_CLI_USER }}" ]; then
+              echo "::error::Secret OCI_CLI_USER is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_USER"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_TENANCY }}" ]; then
+              echo "::error::Secret OCI_CLI_TENANCY is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_TENANCY"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_FINGERPRINT }}" ]; then
+              echo "::error::Secret OCI_CLI_FINGERPRINT is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_FINGERPRINT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_KEY_CONTENT }}" ]; then
+              echo "::error::Secret OCI_CLI_KEY_CONTENT is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_KEY_CONTENT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_REGION }}" ]; then
+              echo "::error::Secret OCI_CLI_REGION is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_REGION"$'\n'
+            fi
+          fi
+
+          # When USE_OCI_CONFIG is true: require config bucket Variables and OCI Secrets
+          if [ "${{ env.USE_OCI_CONFIG }}" = "true" ]; then
+            echo "Validating OCI config bucket Variables (USE_OCI_CONFIG=true)..."
+            if [ -z "${{ vars.OCI_CONFIG_BUCKET_NAMESPACE }}" ]; then
+              echo "::error::Variable OCI_CONFIG_BUCKET_NAMESPACE is required when USE_OCI_CONFIG=true."
+              MISSING_VARS="${MISSING_VARS}OCI_CONFIG_BUCKET_NAMESPACE"$'\n'
+            fi
+            if [ -z "${{ vars.OCI_CONFIG_BUCKET_NAME }}" ]; then
+              echo "::error::Variable OCI_CONFIG_BUCKET_NAME is required when USE_OCI_CONFIG=true."
+              MISSING_VARS="${MISSING_VARS}OCI_CONFIG_BUCKET_NAME"$'\n'
+            fi
+            echo "Validating OCI Secrets for config bucket..."
+            if [ -z "${{ secrets.OCI_CLI_USER }}" ]; then
+              echo "::error::Secret OCI_CLI_USER is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_USER"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_TENANCY }}" ]; then
+              echo "::error::Secret OCI_CLI_TENANCY is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_TENANCY"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_FINGERPRINT }}" ]; then
+              echo "::error::Secret OCI_CLI_FINGERPRINT is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_FINGERPRINT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_KEY_CONTENT }}" ]; then
+              echo "::error::Secret OCI_CLI_KEY_CONTENT is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_KEY_CONTENT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_REGION }}" ]; then
+              echo "::error::Secret OCI_CLI_REGION is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_REGION"$'\n'
+            fi
+          fi
+
+          if [ -n "$MISSING_VARS" ] || [ -n "$MISSING_SECRETS" ]; then
+            echo ""
+            echo "=== Not set (must be configured in Settings → Secrets and variables → Actions) ==="
+            if [ -n "$MISSING_VARS" ]; then
+              echo "Variables not set:"
+              echo "$MISSING_VARS" | sed '/^$/d' | sed 's/^/  - /'
+            fi
+            if [ -n "$MISSING_SECRETS" ]; then
+              echo "Secrets not set:"
+              echo "$MISSING_SECRETS" | sed '/^$/d' | sed 's/^/  - /'
+            fi
+            echo ""
+            echo "::error::Validation failed. Configure the items above in GitHub: Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "Variables and Secrets validation passed."
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify Docker Hub access
+        run: |
+          docker info
+          echo "Docker Hub login verified"
+
+  build-and-push:
+    needs: prevalidate
+    runs-on: ubuntu-latest
+    env:
+      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+      OCI_CLI_PASSPHRASE: ${{ secrets.OCI_CLI_PASSPHRASE || '' }}
+    outputs:
+      docker_tag: ${{ steps.set_tag.outputs.tag }}
+      commit_log: ${{ steps.commit_log.outputs.log }}
+    steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Commit log
+        id: commit_log
+        run: |
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          if [ -n "$BEFORE" ] && [ -n "$AFTER" ] && [ "$BEFORE" != "$AFTER" ]; then
+            LOG=$(git log --oneline "$BEFORE".."$AFTER" 2>/dev/null || true)
+          else
+            LOG=$(git log -1 --oneline HEAD 2>/dev/null || true)
+          fi
+          [ -z "$LOG" ] && LOG="(no list)"
+          echo "## Commits in this push" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$LOG" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          LOG_ONELINE=$(echo "$LOG" | tr '\n' '|' | sed 's/|$//')
+          [ -z "$LOG_ONELINE" ] && LOG_ONELINE="(no list)"
+          echo "log<<EOF" >> $GITHUB_OUTPUT
+          echo "$LOG_ONELINE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Prepare m2-repo
+        run: mkdir -p m2-repo
+
+      - name: Validate OCI config
+        if: env.USE_OCI_M2 == 'true' || env.USE_OCI_CONFIG == 'true'
+        env:
+          OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          OCI_CLI_PASSPHRASE: ${{ secrets.OCI_CLI_PASSPHRASE || '' }}
+        run: |
+          if [ -z "$OCI_CLI_USER" ] || [ -z "$OCI_CLI_TENANCY" ] || [ -z "$OCI_CLI_FINGERPRINT" ] || [ -z "$OCI_CLI_KEY_CONTENT" ] || [ -z "$OCI_CLI_REGION" ]; then
+            echo "::error::One or more OCI secrets are missing: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION"
+            exit 1
+          fi
+          if [ "${{ env.USE_OCI_M2 }}" = "true" ]; then
+            if [ -z "${{ env.OCI_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_BUCKET_NAME }}" ]; then
+              echo "::error::Set OCI_BUCKET_NAMESPACE and OCI_BUCKET_NAME in repo Variables when USE_OCI_M2 is true"
+              exit 1
+            fi
+          fi
+          if [ "${{ env.USE_OCI_CONFIG }}" = "true" ]; then
+            if [ -z "${{ env.OCI_CONFIG_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_CONFIG_BUCKET_NAME }}" ]; then
+              echo "::error::Set OCI_CONFIG_BUCKET_NAMESPACE and OCI_CONFIG_BUCKET_NAME in repo Variables when USE_OCI_CONFIG is true"
+              exit 1
+            fi
+          fi
+          echo "OCI config validation passed"
+
+      - name: Verify OCI bucket access
+        if: env.USE_OCI_M2 == 'true'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object list --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --limit 1'
+
+      - name: Download M2 from OCI (with prefix)
+        if: env.USE_OCI_M2 == 'true' && env.OCI_M2_PREFIX != ''
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object bulk-download --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --prefix ${{ env.OCI_M2_PREFIX }} --download-dir ./m2-repo'
+
+      - name: Download M2 from OCI (no prefix)
+        if: env.USE_OCI_M2 == 'true' && env.OCI_M2_PREFIX == ''
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object bulk-download --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --download-dir ./m2-repo'
+
+      - name: Set OCI config prefix for download
+        if: env.USE_OCI_CONFIG == 'true'
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          PREFIX_BASE="${{ env.OCI_CONFIG_PREFIX }}"
+          [ -n "$PREFIX_BASE" ] && [ "${PREFIX_BASE: -1}" != "/" ] && PREFIX_BASE="${PREFIX_BASE}/"
+          if [ -n "${{ env.OCI_CONFIG_PROFILE }}" ]; then
+            echo "CONFIG_PREFIX=${PREFIX_BASE}${REPO_NAME}/${{ env.OCI_CONFIG_PROFILE }}/" >> $GITHUB_ENV
+            echo "CONFIG_SOURCE_DIR=config-repo/${PREFIX_BASE}${REPO_NAME}/${{ env.OCI_CONFIG_PROFILE }}" >> $GITHUB_ENV
+          else
+            echo "CONFIG_PREFIX=${PREFIX_BASE}${REPO_NAME}/" >> $GITHUB_ENV
+            echo "CONFIG_SOURCE_DIR=config-repo/${PREFIX_BASE}${REPO_NAME}" >> $GITHUB_ENV
+          fi
+
+      - name: Download config from OCI
+        if: env.USE_OCI_CONFIG == 'true'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object bulk-download --namespace ${{ env.OCI_CONFIG_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_CONFIG_BUCKET_NAME }} --prefix ${{ env.CONFIG_PREFIX }} --download-dir ./config-repo'
+
+      - name: Update application.properties before build
+        if: env.USE_OCI_CONFIG == 'true'
+        run: |
+          SRC="${{ env.CONFIG_SOURCE_DIR }}"
+          if [ -d "$SRC" ]; then
+            if [ -f "${SRC}/application.properties" ]; then
+              cp "${SRC}/application.properties" src/main/resources/application.properties
+              echo "Updated src/main/resources/application.properties from OCI config"
+            fi
+            for f in "${SRC}"/application-*.properties; do
+              [ -f "$f" ] || continue
+              cp "$f" "src/main/resources/$(basename "$f")"
+              echo "Updated src/main/resources/$(basename "$f") from OCI config"
+            done
+          fi
+
       - name: Set Docker tag (branch vs tag)
+        id: set_tag
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            # Git tag: <tag-name>-<commit-hash> (e.g. 26.02.01.01-749609e)
             echo "DOCKER_TAG=${{ github.ref_name }}-$SHORT_SHA" >> $GITHUB_ENV
           else
-            # Branch: <branch>-<YYMMDDHH>-<commit-hash>-<run_number> (e.g. dev-26021214-749609e-3)
             YYMMDDHH=$(date +%y%m%d%H)
             echo "DOCKER_TAG=${{ github.ref_name }}-${YYMMDDHH}-${SHORT_SHA}-${{ github.run_number }}" >> $GITHUB_ENV
           fi
+          echo "tag=${{ env.DOCKER_TAG }}" >> $GITHUB_OUTPUT
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-
-      - name: Configure Docker for Artifact Registry
+      - name: Docker image tag (Summary)
+        if: always()
         run: |
-          gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+          echo "## Docker image tag" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${DOCKER_TAG:- (not set) }" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Docker meta (tags & labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ env.DOCKER_TAG }}
 
@@ -72,5 +322,79 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,mode=max,scope=build
+
+  notify-teams:
+    needs: build-and-push
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout for fallback tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute fallback tag
+        id: fallback_tag
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}-$SHORT_SHA" >> $GITHUB_OUTPUT
+          else
+            YYMMDDHH=$(date +%y%m%d%H)
+            echo "tag=${{ github.ref_name }}-${YYMMDDHH}-${SHORT_SHA}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Microsoft Teams
+        continue-on-error: true
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          TAG: ${{ needs.build-and-push.outputs.docker_tag }}
+          FALLBACK_TAG: ${{ steps.fallback_tag.outputs.tag }}
+          DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_USERNAME }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          COMMIT_LOG: ${{ needs.build-and-push.outputs.commit_log }}
+        run: |
+          if [ -z "$TEAMS_WEBHOOK_URL" ]; then
+            echo "TEAMS_WEBHOOK_URL not set, skipping notification"
+            exit 0
+          fi
+          STATUS="${{ needs.build-and-push.result }}"
+          [ "$STATUS" = "success" ] && THEME="0076D7" || THEME="D13438"
+          USE_TAG="${TAG}"
+          [ -z "$USE_TAG" ] && USE_TAG="${FALLBACK_TAG}"
+          [ -z "$USE_TAG" ] && USE_TAG="(build did not complete)"
+          IMAGE_TAG="${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${USE_TAG}"
+          [ -z "$COMMIT_LOG" ] && COMMIT_LOG="(no list)"
+          COMMIT_LOG_BR=$(echo "$COMMIT_LOG" | sed 's/|/<br>/g')
+          BODY=$(jq -n \
+            --arg theme "$THEME" \
+            --arg status "$STATUS" \
+            --arg repo "${{ github.repository }}" \
+            --arg ref "${{ github.ref_name }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg image "$IMAGE_TAG" \
+            --arg commits "$COMMIT_LOG_BR" \
+            --arg runUrl "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              "@type": "MessageCard",
+              "@context": "https://schema.org/extensions",
+              "themeColor": $theme,
+              "summary": ("Docker Build & Push - " + $status),
+              "sections": [
+                {
+                  "activityTitle": "Docker Build & Push to Docker Hub",
+                  "activitySubtitle": $repo,
+                  "facts": [
+                    { "name": "Status", "value": $status },
+                    { "name": "Ref", "value": $ref },
+                    { "name": "Commit", "value": $sha },
+                    { "name": "Image", "value": $image },
+                    { "name": "Run", "value": ("[View workflow](" + $runUrl + ")") }
+                  ]
+                },
+                { "text": ("**Commits**<br>" + $commits) }
+              ]
+            }')
+          curl -sS -X POST -H "Content-Type: application/json" -d "${BODY}" "$TEAMS_WEBHOOK_URL"
