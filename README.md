@@ -8,7 +8,7 @@ This project is a reference microservice for building, containerizing, and deplo
 
 - **Application:** A Spring Boot 3.2 web app on Java 21 with REST endpoints, health check, and OpenAPI/Swagger UI.
 - **Build & image:** Maven build, multi-stage Dockerfile (Amazon Corretto 21), and optional use of private Maven dependencies from OCI Object Storage.
-- **Configuration:** Optional loading of property files at build time from a dedicated OCI config bucket (one folder per repo), baked into the image and loaded via Spring Boot’s `spring.config.additional-location`.
+- **Configuration:** Optional loading of property files at build time from a dedicated OCI config bucket (one folder per repo); the workflow updates `src/main/resources/application.properties` before the build so the JAR is built with those values.
 - **CI/CD:** GitHub Actions workflow that validates variables and secrets, downloads M2 and/or config from OCI when enabled, builds and pushes the image to Docker Hub, and can notify Microsoft Teams.
 
 Use it as a template for microservices that need OCI-backed Maven repos, centralized config in OCI, and Docker Hub publishing via GitHub Actions.
@@ -68,7 +68,7 @@ The **Docker Build & Push to Docker Hub** workflow (`.github/workflows/docker-bu
 
 Optional **OCI M2:** When `USE_OCI_M2=true`, the workflow uses the [Oracle OCI CLI GitHub Action](https://github.com/marketplace/actions/run-an-oracle-cloud-infrastructure-oci-cli-command) to download Maven dependencies from an OCI bucket into `m2-repo/` before the Docker build. You must set the OCI variables and five OCI secrets below.
 
-Optional **OCI config bucket:** When `USE_OCI_CONFIG=true`, the workflow downloads Java property files (e.g. `application.properties`) from a **separate** OCI bucket into the image. The bucket should have one folder per repo (folder name = repository name). Properties are loaded at runtime via Spring Boot’s `spring.config.additional-location=optional:file:/app/config/`. See **OCI config bucket (property files)** below.
+Optional **OCI config bucket:** When `USE_OCI_CONFIG=true`, the workflow downloads property files from a **separate** OCI bucket and updates `src/main/resources/application.properties` (and any `application-*.properties`) before the Docker/Maven build, so the JAR is built with those values. See **OCI config bucket (property files)** below.
 
 ## GitHub Actions: Variables and Secrets
 
@@ -161,7 +161,7 @@ Use a prefix per team or repo, e.g. `OCI_M2_PREFIX=team-a/` so only `team-a/...`
 
 #### Config bucket (property files)
 
-The workflow downloads objects from your **config** bucket into `app-config/` (then copied to `/app/config/` in the image). Path is built from **OCI_CONFIG_PREFIX** (optional), **repo name**, and **OCI_CONFIG_PROFILE** (optional).
+The workflow downloads objects from your **config** bucket into `config-repo/` and copies `application.properties` and `application-*.properties` into `src/main/resources/` before the build, so the JAR contains them. Path is built from **OCI_CONFIG_PREFIX** (optional), **repo name**, and **OCI_CONFIG_PROFILE** (optional).
 
 **Option 1: No prefix, no profile**  
 `OCI_CONFIG_PREFIX` and `OCI_CONFIG_PROFILE` empty. One folder per repo at bucket root:
@@ -211,11 +211,11 @@ bucket: microservice-config
             └── application-prod.properties
 ```
 
-In all cases, the workflow copies the chosen folder’s **contents** into `app-config/`, so the image gets flat files like `application.properties` in `/app/config/`.
+In all cases, the workflow copies `application.properties` and `application-*.properties` from the chosen folder into `src/main/resources/` before the Maven/Docker build, so the JAR is built with those properties.
 
 ### OCI config bucket (property files)
 
-A **separate** OCI bucket can hold Java property files for all microservices: one folder per repository (folder name = repo name, e.g. `java-sample-docker`). The workflow downloads objects under that folder at build time and bakes them into the image as `/app/config/`; Spring Boot loads them via `spring.config.additional-location=optional:file:/app/config/`.
+A **separate** OCI bucket can hold Java property files for all microservices: one folder per repository (folder name = repo name, e.g. `java-sample-docker`). The workflow downloads objects under that folder at build time and **updates `src/main/resources/application.properties`** (and any `application-*.properties`) before the Docker/Maven build, so the JAR is built with those values.
 
 1. Create an OCI Object Storage bucket (e.g. `microservice-config`) for config only (not the M2 bucket).
 2. For each microservice repo, create a folder in the bucket with the **repository name** (e.g. `java-sample-docker`). If you set **OCI_CONFIG_PREFIX** (e.g. `config/`), objects live under that prefix (e.g. `config/java-sample-docker/application.properties`). With **OCI_CONFIG_PROFILE** (e.g. `prod`), use a profile subfolder (e.g. `config/java-sample-docker/prod/application.properties`). Upload `application.properties` (and optionally profile-specific files) into the repo folder (or repo/profile folder).
@@ -223,4 +223,4 @@ A **separate** OCI bucket can hold Java property files for all microservices: on
 4. Set variables **OCI_CONFIG_BUCKET_NAMESPACE** and **OCI_CONFIG_BUCKET_NAME** to your config bucket’s namespace and name. Optionally set **OCI_CONFIG_PREFIX** (e.g. `config/`) and **OCI_CONFIG_PROFILE** (e.g. `prod`).
 5. Set variable **USE_OCI_CONFIG** to `true`.
 
-The image will then include the downloaded property files in `/app/config/` and the app will load them at startup, overriding defaults from the JAR where applicable.
+The built JAR will then contain the updated properties from the OCI config bucket.

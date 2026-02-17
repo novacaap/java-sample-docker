@@ -192,9 +192,6 @@ jobs:
       - name: Prepare m2-repo
         run: mkdir -p m2-repo
 
-      - name: Prepare app-config
-        run: mkdir -p app-config
-
       - name: Validate OCI config
         if: env.USE_OCI_M2 == 'true' || env.USE_OCI_CONFIG == 'true'
         env:
@@ -261,11 +258,20 @@ jobs:
         with:
           command: 'oci os object bulk-download --namespace ${{ env.OCI_CONFIG_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_CONFIG_BUCKET_NAME }} --prefix ${{ env.CONFIG_PREFIX }} --download-dir ./config-repo'
 
-      - name: Prepare app-config from downloaded config
+      - name: Update application.properties before build
         if: env.USE_OCI_CONFIG == 'true'
         run: |
-          if [ -d "${{ env.CONFIG_SOURCE_DIR }}" ]; then
-            cp -a "${{ env.CONFIG_SOURCE_DIR }}/." app-config/ 2>/dev/null || true
+          SRC="${{ env.CONFIG_SOURCE_DIR }}"
+          if [ -d "$SRC" ]; then
+            if [ -f "${SRC}/application.properties" ]; then
+              cp "${SRC}/application.properties" src/main/resources/application.properties
+              echo "Updated src/main/resources/application.properties from OCI config"
+            fi
+            for f in "${SRC}"/application-*.properties; do
+              [ -f "$f" ] || continue
+              cp "$f" "src/main/resources/$(basename "$f")"
+              echo "Updated src/main/resources/$(basename "$f") from OCI config"
+            done
           fi
 
       - name: Set Docker tag (branch vs tag)
