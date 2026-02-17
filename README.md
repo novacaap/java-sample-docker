@@ -116,6 +116,103 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 
 The workflow uses the official [Oracle OCI CLI GitHub Action](https://github.com/marketplace/actions/run-an-oracle-cloud-infrastructure-oci-cli-command), which installs and caches the OCI CLI and runs the list and bulk-download commands.
 
+### Sample directory structures
+
+#### M2 bucket (Maven dependencies)
+
+The workflow downloads objects from your M2 bucket into `m2-repo/` in **Maven repository layout** (group/artifact/version). Use **OCI_M2_PREFIX** to scope which objects are downloaded.
+
+**Option 1: No prefix (bucket root)**  
+Set `OCI_M2_PREFIX` empty. Objects at bucket root:
+
+```
+bucket: my-m2-bucket
+├── com/
+│   └── company/
+│       └── my-lib/
+│           └── 1.0.0/
+│               ├── my-lib-1.0.0.jar
+│               └── my-lib-1.0.0.pom
+└── ...
+```
+
+After download → local `m2-repo/com/company/my-lib/1.0.0/` (Maven finds it as `com.company:my-lib:1.0.0`).
+
+**Option 2: With prefix**  
+Set `OCI_M2_PREFIX` to e.g. `m2-repo/` or `artifacts/`. Only objects under that prefix are downloaded:
+
+```
+bucket: my-m2-bucket
+└── m2-repo/
+    └── com/
+        └── company/
+            └── my-lib/
+                └── 1.0.0/
+                    ├── my-lib-1.0.0.jar
+                    └── my-lib-1.0.0.pom
+```
+
+After download → local `m2-repo/com/company/my-lib/1.0.0/` (same layout; prefix is stripped by bulk-download path).
+
+**Option 3: Multiple teams/repos under one bucket**  
+Use a prefix per team or repo, e.g. `OCI_M2_PREFIX=team-a/` so only `team-a/...` is downloaded from the same bucket.
+
+---
+
+#### Config bucket (property files)
+
+The workflow downloads objects from your **config** bucket into `app-config/` (then copied to `/app/config/` in the image). Path is built from **OCI_CONFIG_PREFIX** (optional), **repo name**, and **OCI_CONFIG_PROFILE** (optional).
+
+**Option 1: No prefix, no profile**  
+`OCI_CONFIG_PREFIX` and `OCI_CONFIG_PROFILE` empty. One folder per repo at bucket root:
+
+```
+bucket: microservice-config
+└── java-sample-docker/
+    ├── application.properties
+    └── application-prod.properties   (optional, same folder)
+```
+
+**Option 2: No prefix, with profile**  
+Set `OCI_CONFIG_PROFILE=prod`. Config is under `<repo-name>/<profile>/`:
+
+```
+bucket: microservice-config
+└── java-sample-docker/
+    ├── application.properties       (default, optional)
+    └── prod/
+        ├── application.properties
+        └── application-prod.properties
+```
+
+**Option 3: With prefix, no profile**  
+Set `OCI_CONFIG_PREFIX=config/`. All repo folders under that prefix:
+
+```
+bucket: microservice-config
+└── config/
+    ├── java-sample-docker/
+    │   ├── application.properties
+    │   └── logback-spring.xml
+    └── other-service/
+        └── application.properties
+```
+
+**Option 4: With prefix and profile**  
+Set `OCI_CONFIG_PREFIX=config/` and `OCI_CONFIG_PROFILE=prod`:
+
+```
+bucket: microservice-config
+└── config/
+    └── java-sample-docker/
+        ├── application.properties   (default)
+        └── prod/
+            ├── application.properties
+            └── application-prod.properties
+```
+
+In all cases, the workflow copies the chosen folder’s **contents** into `app-config/`, so the image gets flat files like `application.properties` in `/app/config/`.
+
 ### OCI config bucket (property files)
 
 A **separate** OCI bucket can hold Java property files for all microservices: one folder per repository (folder name = repo name, e.g. `java-sample-docker`). The workflow downloads objects under that folder at build time and bakes them into the image as `/app/config/`; Spring Boot loads them via `spring.config.additional-location=optional:file:/app/config/`.
