@@ -7,7 +7,7 @@ on:
 env:
   IMAGE_NAME: acute
   # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION; optional OCI_CLI_PASSPHRASE when private key is encrypted. Set USE_OCI_M2=true to enable.
-  # OCI config bucket: separate bucket, one folder per repo (repo name). Set USE_OCI_CONFIG=true and OCI_CONFIG_BUCKET_NAMESPACE, OCI_CONFIG_BUCKET_NAME; optional OCI_CONFIG_PROFILE. Same OCI secrets as M2.
+  # OCI config bucket: separate bucket, one folder per repo (repo name). Set USE_OCI_CONFIG=true and OCI_CONFIG_BUCKET_NAMESPACE, OCI_CONFIG_BUCKET_NAME; optional OCI_CONFIG_PREFIX, OCI_CONFIG_PROFILE. Same OCI secrets as M2.
   OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
   OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
   OCI_M2_PREFIX: ${{ vars.OCI_M2_PREFIX || '' }}
@@ -15,6 +15,7 @@ env:
   USE_OCI_CONFIG: ${{ vars.USE_OCI_CONFIG || 'false' }}
   OCI_CONFIG_BUCKET_NAMESPACE: ${{ vars.OCI_CONFIG_BUCKET_NAMESPACE || '' }}
   OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
+  OCI_CONFIG_PREFIX: ${{ vars.OCI_CONFIG_PREFIX || '' }}
   OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
   DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 
@@ -29,6 +30,7 @@ jobs:
       OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
       OCI_CONFIG_BUCKET_NAMESPACE: ${{ vars.OCI_CONFIG_BUCKET_NAMESPACE || '' }}
       OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
+      OCI_CONFIG_PREFIX: ${{ vars.OCI_CONFIG_PREFIX || '' }}
       OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
     steps:
       - name: Validate Variables and Secrets
@@ -243,10 +245,14 @@ jobs:
         if: env.USE_OCI_CONFIG == 'true'
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
+          PREFIX_BASE="${{ env.OCI_CONFIG_PREFIX }}"
+          [ -n "$PREFIX_BASE" ] && [ "${PREFIX_BASE: -1}" != "/" ] && PREFIX_BASE="${PREFIX_BASE}/"
           if [ -n "${{ env.OCI_CONFIG_PROFILE }}" ]; then
-            echo "CONFIG_PREFIX=${REPO_NAME}/${{ env.OCI_CONFIG_PROFILE }}/" >> $GITHUB_ENV
+            echo "CONFIG_PREFIX=${PREFIX_BASE}${REPO_NAME}/${{ env.OCI_CONFIG_PROFILE }}/" >> $GITHUB_ENV
+            echo "CONFIG_SOURCE_DIR=config-repo/${PREFIX_BASE}${REPO_NAME}/${{ env.OCI_CONFIG_PROFILE }}" >> $GITHUB_ENV
           else
-            echo "CONFIG_PREFIX=${REPO_NAME}/" >> $GITHUB_ENV
+            echo "CONFIG_PREFIX=${PREFIX_BASE}${REPO_NAME}/" >> $GITHUB_ENV
+            echo "CONFIG_SOURCE_DIR=config-repo/${PREFIX_BASE}${REPO_NAME}" >> $GITHUB_ENV
           fi
 
       - name: Download config from OCI
@@ -258,14 +264,8 @@ jobs:
       - name: Prepare app-config from downloaded config
         if: env.USE_OCI_CONFIG == 'true'
         run: |
-          REPO_NAME="${{ github.event.repository.name }}"
-          if [ -n "${{ env.OCI_CONFIG_PROFILE }}" ]; then
-            SRC="config-repo/${REPO_NAME}/${{ env.OCI_CONFIG_PROFILE }}"
-          else
-            SRC="config-repo/${REPO_NAME}"
-          fi
-          if [ -d "$SRC" ]; then
-            cp -a "$SRC/." app-config/ 2>/dev/null || true
+          if [ -d "${{ env.CONFIG_SOURCE_DIR }}" ]; then
+            cp -a "${{ env.CONFIG_SOURCE_DIR }}/." app-config/ 2>/dev/null || true
           fi
 
       - name: Set Docker tag (branch vs tag)

@@ -86,7 +86,8 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 | `USE_OCI_CONFIG`       | No (default: false)  | Set to `true` to enable downloading property files from a separate OCI config bucket (one folder per repo). Requires OCI config bucket variables and the same OCI secrets. |
 | `OCI_CONFIG_BUCKET_NAMESPACE` | When USE_OCI_CONFIG=true | OCI Object Storage namespace for the **config** bucket (separate from M2 bucket). |
 | `OCI_CONFIG_BUCKET_NAME`      | When USE_OCI_CONFIG=true | Name of the bucket that holds microservice property files (e.g. `application.properties`), with one folder per repo. |
-| `OCI_CONFIG_PROFILE`   | No                   | Optional Spring profile name (e.g. `prod`, `qa`). When set, all objects under the repo folder are still downloaded; use this if you name files like `application-prod.properties`. |
+| `OCI_CONFIG_PREFIX`    | No                   | Object prefix (folder) inside the config bucket, e.g. `config/` or `microservices/`. Download path is `<prefix><repo-name>/` or `<prefix><repo-name>/<profile>/`. Leave empty to use the bucket root. |
+| `OCI_CONFIG_PROFILE`   | No                   | Optional Spring profile name (e.g. `prod`, `qa`). When set, config is downloaded from `<prefix><repo-name>/<profile>/`; use for profile-specific property files. |
 
 ### Secrets
 
@@ -120,9 +121,9 @@ The workflow uses the official [Oracle OCI CLI GitHub Action](https://github.com
 A **separate** OCI bucket can hold Java property files for all microservices: one folder per repository (folder name = repo name, e.g. `java-sample-docker`). The workflow downloads objects under that folder at build time and bakes them into the image as `/app/config/`; Spring Boot loads them via `spring.config.additional-location=optional:file:/app/config/`.
 
 1. Create an OCI Object Storage bucket (e.g. `microservice-config`) for config only (not the M2 bucket).
-2. For each microservice repo, create a folder in the bucket with the **repository name** (e.g. `java-sample-docker`). Upload `application.properties` (and optionally `application-<profile>.properties`) into that folder. Example object names: `java-sample-docker/application.properties`, `java-sample-docker/application-prod.properties`.
+2. For each microservice repo, create a folder in the bucket with the **repository name** (e.g. `java-sample-docker`). If you set **OCI_CONFIG_PREFIX** (e.g. `config/`), objects live under that prefix (e.g. `config/java-sample-docker/application.properties`). With **OCI_CONFIG_PROFILE** (e.g. `prod`), use a profile subfolder (e.g. `config/java-sample-docker/prod/application.properties`). Upload `application.properties` (and optionally profile-specific files) into the repo folder (or repo/profile folder).
 3. Configure OCI CLI secrets as in **OCI setup (when using USE_OCI_M2)** above (same secrets work for both M2 and config bucket).
-4. Set variables **OCI_CONFIG_BUCKET_NAMESPACE** and **OCI_CONFIG_BUCKET_NAME** to your config bucket’s namespace and name.
+4. Set variables **OCI_CONFIG_BUCKET_NAMESPACE** and **OCI_CONFIG_BUCKET_NAME** to your config bucket’s namespace and name. Optionally set **OCI_CONFIG_PREFIX** (e.g. `config/`) and **OCI_CONFIG_PROFILE** (e.g. `prod`).
 5. Set variable **USE_OCI_CONFIG** to `true`.
 
 The image will then include the downloaded property files in `/app/config/` and the app will load them at startup, overriding defaults from the JAR where applicable.
