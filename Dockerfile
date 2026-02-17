@@ -18,5 +18,7 @@ FROM amazoncorretto:21-alpine-jdk
 EXPOSE 8080
 
 COPY --from=maven_build /tmp/target/java-sample-app-1.0.0.jar /app/app.jar
+# OCI config bucket: workflow may populate app-config/ (e.g. application.properties); optional so empty dir is fine
+COPY app-config/ /app/config/
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-Dspring.config.additional-location=optional:file:/app/config/", "-jar", "/app/app.jar"]

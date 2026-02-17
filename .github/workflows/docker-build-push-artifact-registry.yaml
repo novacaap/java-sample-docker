@@ -7,10 +7,15 @@ on:
 env:
   IMAGE_NAME: acute
   # OCI Object Storage for Maven M2 dependencies (optional). Set vars: OCI_BUCKET_NAMESPACE, OCI_BUCKET_NAME; optional OCI_M2_PREFIX. Secrets: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION; optional OCI_CLI_PASSPHRASE when private key is encrypted. Set USE_OCI_M2=true to enable.
+  # OCI config bucket: separate bucket, one folder per repo (repo name). Set USE_OCI_CONFIG=true and OCI_CONFIG_BUCKET_NAMESPACE, OCI_CONFIG_BUCKET_NAME; optional OCI_CONFIG_PROFILE. Same OCI secrets as M2.
   OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
   OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
   OCI_M2_PREFIX: ${{ vars.OCI_M2_PREFIX || '' }}
   USE_OCI_M2: ${{ vars.USE_OCI_M2 || 'false' }}
+  USE_OCI_CONFIG: ${{ vars.USE_OCI_CONFIG || 'false' }}
+  OCI_CONFIG_BUCKET_NAMESPACE: ${{ vars.OCI_CONFIG_BUCKET_NAMESPACE || '' }}
+  OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
+  OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
   DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 
 jobs:
@@ -19,8 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       USE_OCI_M2: ${{ vars.USE_OCI_M2 || 'false' }}
+      USE_OCI_CONFIG: ${{ vars.USE_OCI_CONFIG || 'false' }}
       OCI_BUCKET_NAMESPACE: ${{ vars.OCI_BUCKET_NAMESPACE || '' }}
       OCI_BUCKET_NAME: ${{ vars.OCI_BUCKET_NAME || '' }}
+      OCI_CONFIG_BUCKET_NAMESPACE: ${{ vars.OCI_CONFIG_BUCKET_NAMESPACE || '' }}
+      OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
     steps:
       - name: Validate Variables and Secrets
         run: |
@@ -72,6 +80,40 @@ jobs:
             fi
             if [ -z "${{ secrets.OCI_CLI_REGION }}" ]; then
               echo "::error::Secret OCI_CLI_REGION is required when USE_OCI_M2=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_REGION"$'\n'
+            fi
+          fi
+
+          # When USE_OCI_CONFIG is true: require config bucket Variables and OCI Secrets
+          if [ "${{ env.USE_OCI_CONFIG }}" = "true" ]; then
+            echo "Validating OCI config bucket Variables (USE_OCI_CONFIG=true)..."
+            if [ -z "${{ vars.OCI_CONFIG_BUCKET_NAMESPACE }}" ]; then
+              echo "::error::Variable OCI_CONFIG_BUCKET_NAMESPACE is required when USE_OCI_CONFIG=true."
+              MISSING_VARS="${MISSING_VARS}OCI_CONFIG_BUCKET_NAMESPACE"$'\n'
+            fi
+            if [ -z "${{ vars.OCI_CONFIG_BUCKET_NAME }}" ]; then
+              echo "::error::Variable OCI_CONFIG_BUCKET_NAME is required when USE_OCI_CONFIG=true."
+              MISSING_VARS="${MISSING_VARS}OCI_CONFIG_BUCKET_NAME"$'\n'
+            fi
+            echo "Validating OCI Secrets for config bucket..."
+            if [ -z "${{ secrets.OCI_CLI_USER }}" ]; then
+              echo "::error::Secret OCI_CLI_USER is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_USER"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_TENANCY }}" ]; then
+              echo "::error::Secret OCI_CLI_TENANCY is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_TENANCY"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_FINGERPRINT }}" ]; then
+              echo "::error::Secret OCI_CLI_FINGERPRINT is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_FINGERPRINT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_KEY_CONTENT }}" ]; then
+              echo "::error::Secret OCI_CLI_KEY_CONTENT is required when USE_OCI_CONFIG=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_KEY_CONTENT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_REGION }}" ]; then
+              echo "::error::Secret OCI_CLI_REGION is required when USE_OCI_CONFIG=true."
               MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_REGION"$'\n'
             fi
           fi
@@ -147,8 +189,11 @@ jobs:
       - name: Prepare m2-repo
         run: mkdir -p m2-repo
 
+      - name: Prepare app-config
+        run: mkdir -p app-config
+
       - name: Validate OCI config
-        if: env.USE_OCI_M2 == 'true'
+        if: env.USE_OCI_M2 == 'true' || env.USE_OCI_CONFIG == 'true'
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
@@ -158,12 +203,20 @@ jobs:
           OCI_CLI_PASSPHRASE: ${{ secrets.OCI_CLI_PASSPHRASE || '' }}
         run: |
           if [ -z "$OCI_CLI_USER" ] || [ -z "$OCI_CLI_TENANCY" ] || [ -z "$OCI_CLI_FINGERPRINT" ] || [ -z "$OCI_CLI_KEY_CONTENT" ] || [ -z "$OCI_CLI_REGION" ]; then
-            echo "::error::USE_OCI_M2 is true but one or more OCI secrets are missing: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION"
+            echo "::error::One or more OCI secrets are missing: OCI_CLI_USER, OCI_CLI_TENANCY, OCI_CLI_FINGERPRINT, OCI_CLI_KEY_CONTENT, OCI_CLI_REGION"
             exit 1
           fi
-          if [ -z "${{ env.OCI_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_BUCKET_NAME }}" ]; then
-            echo "::error::Set OCI_BUCKET_NAMESPACE and OCI_BUCKET_NAME in repo Variables when USE_OCI_M2 is true"
-            exit 1
+          if [ "${{ env.USE_OCI_M2 }}" = "true" ]; then
+            if [ -z "${{ env.OCI_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_BUCKET_NAME }}" ]; then
+              echo "::error::Set OCI_BUCKET_NAMESPACE and OCI_BUCKET_NAME in repo Variables when USE_OCI_M2 is true"
+              exit 1
+            fi
+          fi
+          if [ "${{ env.USE_OCI_CONFIG }}" = "true" ]; then
+            if [ -z "${{ env.OCI_CONFIG_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_CONFIG_BUCKET_NAME }}" ]; then
+              echo "::error::Set OCI_CONFIG_BUCKET_NAMESPACE and OCI_CONFIG_BUCKET_NAME in repo Variables when USE_OCI_CONFIG is true"
+              exit 1
+            fi
           fi
           echo "OCI config validation passed"
 
@@ -184,6 +237,20 @@ jobs:
         uses: oracle-actions/run-oci-cli-command@v1.3.2
         with:
           command: 'oci os object bulk-download --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --download-dir ./m2-repo'
+
+      - name: Download config from OCI
+        if: env.USE_OCI_CONFIG == 'true'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object bulk-download --namespace ${{ env.OCI_CONFIG_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_CONFIG_BUCKET_NAME }} --prefix ${{ github.event.repository.name }}/ --download-dir ./config-repo'
+
+      - name: Prepare app-config from downloaded config
+        if: env.USE_OCI_CONFIG == 'true'
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          if [ -d "config-repo/${REPO_NAME}" ]; then
+            cp -a "config-repo/${REPO_NAME}/." app-config/ 2>/dev/null || true
+          fi
 
       - name: Set Docker tag (branch vs tag)
         id: set_tag
