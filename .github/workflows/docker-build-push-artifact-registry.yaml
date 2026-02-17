@@ -1,7 +1,7 @@
 name: Docker Build & Push to Docker Hub
 on:
   push:
-    branches: [dev, qa, prod]
+    branches: [dev, qa, prod, feature/m2bucket]
     tags: ['*']
   workflow_dispatch:
 env:
@@ -17,6 +17,8 @@ env:
   OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
   OCI_CONFIG_PREFIX: ${{ vars.OCI_CONFIG_PREFIX || '' }}
   OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
+  PUSH_JAR_TO_OCI: ${{ vars.PUSH_JAR_TO_OCI || 'false' }}
+  OCI_JAR_UPLOAD_PREFIX: ${{ vars.OCI_JAR_UPLOAD_PREFIX || vars.OCI_M2_PREFIX || '' }}
   DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 
 jobs:
@@ -32,6 +34,7 @@ jobs:
       OCI_CONFIG_BUCKET_NAME: ${{ vars.OCI_CONFIG_BUCKET_NAME || '' }}
       OCI_CONFIG_PREFIX: ${{ vars.OCI_CONFIG_PREFIX || '' }}
       OCI_CONFIG_PROFILE: ${{ vars.OCI_CONFIG_PROFILE || '' }}
+      PUSH_JAR_TO_OCI: ${{ vars.PUSH_JAR_TO_OCI || 'false' }}
     steps:
       - name: Validate Variables and Secrets
         run: |
@@ -121,6 +124,40 @@ jobs:
             fi
           fi
 
+          # When PUSH_JAR_TO_OCI is true: require OCI bucket Variables and OCI Secrets
+          if [ "${{ env.PUSH_JAR_TO_OCI }}" = "true" ]; then
+            echo "Validating OCI bucket for JAR upload (PUSH_JAR_TO_OCI=true)..."
+            if [ -z "${{ vars.OCI_BUCKET_NAMESPACE }}" ]; then
+              echo "::error::Variable OCI_BUCKET_NAMESPACE is required when PUSH_JAR_TO_OCI=true."
+              MISSING_VARS="${MISSING_VARS}OCI_BUCKET_NAMESPACE"$'\n'
+            fi
+            if [ -z "${{ vars.OCI_BUCKET_NAME }}" ]; then
+              echo "::error::Variable OCI_BUCKET_NAME is required when PUSH_JAR_TO_OCI=true."
+              MISSING_VARS="${MISSING_VARS}OCI_BUCKET_NAME"$'\n'
+            fi
+            echo "Validating OCI Secrets for JAR upload..."
+            if [ -z "${{ secrets.OCI_CLI_USER }}" ]; then
+              echo "::error::Secret OCI_CLI_USER is required when PUSH_JAR_TO_OCI=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_USER"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_TENANCY }}" ]; then
+              echo "::error::Secret OCI_CLI_TENANCY is required when PUSH_JAR_TO_OCI=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_TENANCY"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_FINGERPRINT }}" ]; then
+              echo "::error::Secret OCI_CLI_FINGERPRINT is required when PUSH_JAR_TO_OCI=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_FINGERPRINT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_KEY_CONTENT }}" ]; then
+              echo "::error::Secret OCI_CLI_KEY_CONTENT is required when PUSH_JAR_TO_OCI=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_KEY_CONTENT"$'\n'
+            fi
+            if [ -z "${{ secrets.OCI_CLI_REGION }}" ]; then
+              echo "::error::Secret OCI_CLI_REGION is required when PUSH_JAR_TO_OCI=true."
+              MISSING_SECRETS="${MISSING_SECRETS}OCI_CLI_REGION"$'\n'
+            fi
+          fi
+
           if [ -n "$MISSING_VARS" ] || [ -n "$MISSING_SECRETS" ]; then
             echo ""
             echo "=== Not set (must be configured in Settings → Secrets and variables → Actions) ==="
@@ -193,7 +230,7 @@ jobs:
         run: mkdir -p m2-repo
 
       - name: Validate OCI config
-        if: env.USE_OCI_M2 == 'true' || env.USE_OCI_CONFIG == 'true'
+        if: env.USE_OCI_M2 == 'true' || env.USE_OCI_CONFIG == 'true' || env.PUSH_JAR_TO_OCI == 'true'
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
@@ -215,6 +252,12 @@ jobs:
           if [ "${{ env.USE_OCI_CONFIG }}" = "true" ]; then
             if [ -z "${{ env.OCI_CONFIG_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_CONFIG_BUCKET_NAME }}" ]; then
               echo "::error::Set OCI_CONFIG_BUCKET_NAMESPACE and OCI_CONFIG_BUCKET_NAME in repo Variables when USE_OCI_CONFIG is true"
+              exit 1
+            fi
+          fi
+          if [ "${{ env.PUSH_JAR_TO_OCI }}" = "true" ]; then
+            if [ -z "${{ env.OCI_BUCKET_NAMESPACE }}" ] || [ -z "${{ env.OCI_BUCKET_NAME }}" ]; then
+              echo "::error::Set OCI_BUCKET_NAMESPACE and OCI_BUCKET_NAME in repo Variables when PUSH_JAR_TO_OCI is true"
               exit 1
             fi
           fi
@@ -273,6 +316,46 @@ jobs:
               echo "Updated src/main/resources/$(basename "$f") from OCI config"
             done
           fi
+
+      - name: Build JAR for OCI upload
+        if: env.PUSH_JAR_TO_OCI == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Build and get Maven coordinates
+        if: env.PUSH_JAR_TO_OCI == 'true'
+        run: |
+          MVN_REPO="${{ github.workspace }}/m2-repo"
+          mvn -Dmaven.repo.local="$MVN_REPO" package -DskipTests -B -q
+          GROUP_ID=$(mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout)
+          ARTIFACT_ID=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout)
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          GROUP_PATH=$(echo "$GROUP_ID" | tr '.' '/')
+          PREFIX="${{ env.OCI_JAR_UPLOAD_PREFIX }}"
+          [ -n "$PREFIX" ] && [ "${PREFIX: -1}" != "/" ] && PREFIX="${PREFIX}/"
+          BASE_PATH="${PREFIX}${GROUP_PATH}/${ARTIFACT_ID}/${VERSION}"
+          echo "MAVEN_GROUP_ID=$GROUP_ID" >> $GITHUB_ENV
+          echo "MAVEN_ARTIFACT_ID=$ARTIFACT_ID" >> $GITHUB_ENV
+          echo "MAVEN_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "JAR_PATH=target/${ARTIFACT_ID}-${VERSION}.jar" >> $GITHUB_ENV
+          echo "JAR_OBJECT_NAME=${BASE_PATH}/${ARTIFACT_ID}-${VERSION}.jar" >> $GITHUB_ENV
+          echo "POM_OBJECT_NAME=${BASE_PATH}/${ARTIFACT_ID}-${VERSION}.pom" >> $GITHUB_ENV
+          echo "Built ${ARTIFACT_ID}-${VERSION}.jar"
+
+      - name: Upload JAR to OCI bucket
+        if: env.PUSH_JAR_TO_OCI == 'true'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object put --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --name "${{ env.JAR_OBJECT_NAME }}" --file ${{ env.JAR_PATH }}'
+
+      - name: Upload POM to OCI bucket
+        if: env.PUSH_JAR_TO_OCI == 'true'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'oci os object put --namespace ${{ env.OCI_BUCKET_NAMESPACE }} --bucket-name ${{ env.OCI_BUCKET_NAME }} --name "${{ env.POM_OBJECT_NAME }}" --file pom.xml'
 
       - name: Set Docker tag (branch vs tag)
         id: set_tag

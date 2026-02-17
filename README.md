@@ -63,7 +63,7 @@ The **Docker Build & Push to Docker Hub** workflow (`.github/workflows/docker-bu
 - **Tag format:** Branch builds use `<ref>-<YYMMDDHH>-<short-sha>-<run_number>` (e.g. `dev-25021214-a1b2c3d-4`); tag builds use `<tag-name>-<short-sha>`.
 - **Jobs:**
   1. **Pre-validate:** Checks `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, then logs in to Docker Hub.
-  2. **Build and push:** Checkout, optional M2 download from OCI Object Storage, optional config (property files) download from a separate OCI config bucket, Docker build, then push to Docker Hub.
+  2. **Build and push:** Checkout, optional M2 download from OCI, optional config download from OCI config bucket, optional JAR build and upload to OCI bucket (when PUSH_JAR_TO_OCI=true), Docker build, then push to Docker Hub.
   3. **Notify Teams:** If `TEAMS_WEBHOOK_URL` is set, sends a MessageCard with status, ref, commit, image tag, commit list (one per line), and a link to the run.
 
 Optional **OCI M2:** When `USE_OCI_M2=true`, the workflow uses the [Oracle OCI CLI GitHub Action](https://github.com/marketplace/actions/run-an-oracle-cloud-infrastructure-oci-cli-command) to download Maven dependencies from an OCI bucket into `m2-repo/` before the Docker build. You must set the OCI variables and five OCI secrets below.
@@ -88,6 +88,8 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 | `OCI_CONFIG_BUCKET_NAME`      | When USE_OCI_CONFIG=true | Name of the bucket that holds microservice property files (e.g. `application.properties`), with one folder per repo. |
 | `OCI_CONFIG_PREFIX`    | No                   | Object prefix (folder) inside the config bucket, e.g. `config/` or `microservices/`. Download path is `<prefix><repo-name>/` or `<prefix><repo-name>/<profile>/`. Leave empty to use the bucket root. |
 | `OCI_CONFIG_PROFILE`   | No                   | Optional Spring profile name (e.g. `prod`, `qa`). When set, config is downloaded from `<prefix><repo-name>/<profile>/`; use for profile-specific property files. |
+| `PUSH_JAR_TO_OCI`      | No (default: false)  | Set to `true` to build the JAR (after config update) and upload it with the POM to the OCI M2 bucket in Maven layout so other apps can use it as a dependency. Requires OCI bucket variables and OCI secrets. |
+| `OCI_JAR_UPLOAD_PREFIX`| No                   | Object prefix for JAR upload (e.g. `m2-repo/`). Defaults to `OCI_M2_PREFIX` when set. Upload path is `<prefix><groupId>/<artifactId>/<version>/<artifact>-<version>.jar` (and `.pom`). |
 
 ### Secrets
 
@@ -95,11 +97,11 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 | --------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DOCKERHUB_TOKEN`     | Yes                  | Docker Hub personal access token (PAT). Create at [Docker Hub → Account Settings → Security → New Access Token](https://hub.docker.com/settings/security). Use **Read, Write, Delete** (or at least **Read & Write**). If you get "insufficient scopes" or 401 on push, create a new token with write permission. |
 | `TEAMS_WEBHOOK_URL`   | No                   | Microsoft Teams incoming webhook URL. When set, the workflow sends a notification (success or failure) with status, ref, commit SHA, image tag, commit list (each commit on its own line), and a link to the workflow run. Create in Teams: channel → Connectors → Incoming Webhook.                              |
-| `OCI_CLI_USER`        | When USE_OCI_M2 or USE_OCI_CONFIG=true | User OCID from your OCI config (`[DEFAULT]` → `user=`).                                                                                                                                                                                                                                                           |
-| `OCI_CLI_TENANCY`     | When USE_OCI_M2 or USE_OCI_CONFIG=true | Tenancy OCID from config (`tenancy=`).                                                                                                                                                                                                                                                                            |
-| `OCI_CLI_FINGERPRINT` | When USE_OCI_M2 or USE_OCI_CONFIG=true | API key fingerprint from config (`fingerprint=`).                                                                                                                                                                                                                                                                 |
-| `OCI_CLI_KEY_CONTENT` | When USE_OCI_M2 or USE_OCI_CONFIG=true | Full private key PEM: entire contents of the key file (including `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`).                                                                                                                                                                                  |
-| `OCI_CLI_REGION`      | When USE_OCI_M2 or USE_OCI_CONFIG=true | Region identifier from config (`region=`), e.g. `ap-mumbai-1`, `us-ashburn-1`.                                                                                                                                                                                                                                    |
+| `OCI_CLI_USER`        | When USE_OCI_M2, USE_OCI_CONFIG, or PUSH_JAR_TO_OCI=true | User OCID from your OCI config (`[DEFAULT]` → `user=`).                                                                                                                                                                                                                                                           |
+| `OCI_CLI_TENANCY`     | When USE_OCI_M2, USE_OCI_CONFIG, or PUSH_JAR_TO_OCI=true | Tenancy OCID from config (`tenancy=`).                                                                                                                                                                                                                                                                            |
+| `OCI_CLI_FINGERPRINT` | When USE_OCI_M2, USE_OCI_CONFIG, or PUSH_JAR_TO_OCI=true | API key fingerprint from config (`fingerprint=`).                                                                                                                                                                                                                                                                 |
+| `OCI_CLI_KEY_CONTENT` | When USE_OCI_M2, USE_OCI_CONFIG, or PUSH_JAR_TO_OCI=true | Full private key PEM: entire contents of the key file (including `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----`).                                                                                                                                                                                  |
+| `OCI_CLI_REGION`      | When USE_OCI_M2, USE_OCI_CONFIG, or PUSH_JAR_TO_OCI=true | Region identifier from config (`region=`), e.g. `ap-mumbai-1`, `us-ashburn-1`.                                                                                                                                                                                                                                    |
 | `OCI_CLI_PASSPHRASE`  | No (when key encrypted) | Passphrase for the OCI API signing key. Set this secret only when your private key is encrypted (passphrase-protected). The workflow uses the `OCI_CLI_PASSPHRASE` environment variable expected by the OCI CLI. Leave unset if the key is not encrypted.                                                          |
 
 ### OCI setup (when using USE_OCI_M2)
@@ -115,6 +117,10 @@ Configure these in the repo **Settings → Secrets and variables → Actions**. 
 5. Set variable **USE_OCI_M2** to `true`.
 
 The workflow uses the official [Oracle OCI CLI GitHub Action](https://github.com/marketplace/actions/run-an-oracle-cloud-infrastructure-oci-cli-command), which installs and caches the OCI CLI and runs the list and bulk-download commands.
+
+### Push JAR to OCI (for other app builds)
+
+When **PUSH_JAR_TO_OCI** is `true`, the workflow builds the JAR with Maven (after config and M2 are prepared), then uploads the JAR and `pom.xml` to the same OCI bucket used for M2 (or the one you set) in **Maven repository layout**: `<prefix><groupId>/<artifactId>/<version>/<artifactId>-<version>.jar` and `.pom`. Other applications can then depend on this artifact by configuring the same bucket as a Maven repository (e.g. with `OCI_M2_PREFIX` pointing to the same prefix). Use **OCI_JAR_UPLOAD_PREFIX** to control where the JAR is written (defaults to **OCI_M2_PREFIX** when set). Requires **OCI_BUCKET_NAMESPACE**, **OCI_BUCKET_NAME**, and the same OCI CLI secrets.
 
 ### Sample directory structures
 
