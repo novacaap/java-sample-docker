@@ -223,4 +223,5 @@ A **separate** OCI bucket can hold Java property files for all microservices: on
 4. Set variables **OCI_CONFIG_BUCKET_NAMESPACE** and **OCI_CONFIG_BUCKET_NAME** to your config bucket’s namespace and name. Optionally set **OCI_CONFIG_PREFIX** (e.g. `config/`) and **OCI_CONFIG_PROFILE** (e.g. `prod`).
 5. Set variable **USE_OCI_CONFIG** to `true`.
 
+
 The built JAR will then contain the updated properties from the OCI config bucket.
